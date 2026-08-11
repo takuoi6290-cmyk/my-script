@@ -15,6 +15,7 @@
             height: 100vh;
             margin: 0;
             overflow: hidden;
+            transition: background-color 1s ease; /* 背景色が変わるときにフワッと変わる演出 */
         }
         .terminal {
             width: 80%;
@@ -188,6 +189,30 @@
                 });
 
                 addLog("> 完了。システムは安全に保護されました。");
+
+                // ① すべて終わったら背景を緑色に変える
+                document.body.style.backgroundColor = "#003311";
+                const terminalBox = document.querySelector('.terminal');
+                terminalBox.style.borderColor = "#00ff66";
+                terminalBox.style.boxShadow = "0 0 25px rgba(0, 255, 102, 0.6)";
+
+                // ② その10秒後に、YouTubeのランダムな動画を新しいタブで開く
+                setTimeout(() => {
+                    // ランダムに選ばれるYouTubeの動画IDのリスト
+                    const videoIds = [
+                        "dQw4w9WgXcQ", // Rickroll
+                        "jNQXAC9IVRw", // Me at the zoo
+                        "9bZkp7q19f0", // Gangnam Style
+                        "kJQP7kiw5Fk", // Despacito
+                        "3JZ_D3ELwOQ"  // Shape of You
+                    ];
+                    // リストからランダムに1つ選ぶ
+                    const randomId = videoIds[Math.floor(Math.random() * videoIds.length)];
+                    const youtubeUrl = `https://www.youtube.com/watch?v=${randomId}`;
+                    
+                    // 新しいタブで開く
+                    window.open(youtubeUrl, '_blank');
+                }, 10000); // 10000ミリ秒 = 10秒
 
             } catch (error) {
                 addWarn("処理中にエラーが発生しました。");
